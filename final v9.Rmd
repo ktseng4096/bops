@@ -1,0 +1,510 @@
+---
+title: "Buy Online Pick Up in Store (BOPS)"
+author: "Kevin, Ram, Ryo"
+date: "June 6, 2017"
+output: 
+  slidy_presentation: default
+  ioslides_presentation: default
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+setwd("C:/Users/ktseng/Dropbox/SCU/OMIS 3392/project") 
+# Assessing the impact of buy-online-pick up-in store strategy on online and Brick-and-mortar store sales and returns
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+## Load Data Set
+library(data.table)
+library(readr)
+library(dplyr)
+library(VIF)
+library(usdm)
+library(AER)
+library(foreign)
+bops <- read_csv("C:/Users/ktseng/Dropbox/SCU/OMIS 3392/project/data.txt")
+bops <- as.data.table(bops)
+bops2012 <- fread("C:/Users/ktseng/Dropbox/SCU/OMIS 3392/project/BOPS-FY12.csv")
+bops2013 <- fread("C:/Users/ktseng/Dropbox/SCU/OMIS 3392/project/BOPS-FY13.csv")
+
+# bops - original data file
+# bops1 - used for returns model
+# bops2 - used for sales model
+# bops3 - sales model for store 2 and 6
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops$gender[is.na(bops$gender)] <- "U"
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops$homeowner_code[bops$homeowner_code == "R"] <- 0
+bops$homeowner_code[bops$homeowner_code == "O"] <- 1
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops$store_number <- as.factor(bops$store_number)
+bops <- within(bops, store_number <- relevel(store_number, ref = 3))
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+
+# Visualization of Variables
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+## Normality Check
+library(ggplot2)
+p1 <- ggplot(bops, aes(x=net_purchase_amount)) + 
+  geom_histogram()
+p2 <- ggplot(bops, aes(x=age_band))+
+  geom_histogram()
+p3 <-ggplot(bops, aes(x=est_income_code))+
+  geom_histogram()
+p4 <-ggplot(bops, aes(x=length_of_residence))+
+  geom_histogram()
+p8 <-ggplot(bops, aes(x=summary))+
+  geom_bar()
+p9 <-ggplot(bops, aes(x=child))+
+  geom_bar(width=0.3)
+p10 <-ggplot(bops, aes(x=homeowner_code))+
+  geom_bar(width=0.3)
+p11 <-ggplot(bops, aes(x=ethnic_code))+
+  geom_bar(width=0.3)
+p12 <-ggplot(bops, aes(x=year)) +
+  geom_bar(width=0.3)
+multiplot(p1, p2, p3,p4,p8, p9, p10, p11, p12, cols=3)
+
+```
+
+
+# Goal 1: Store Sales
+
+**Purpose**:  Assess the impact of the BOPS strategy on store sales  
+
+**Primary Independent Variable**: BOPS (dummy variable)  
+0 - mail  
+1 - store pickup
+
+**Secondary Independent Variable**: Store Number  
+As the purpose states, we want to assess impact at the store level.
+
+**Control Variables**:  
+log(net_puchase_amount)*  
+gender  
+age_band  
+est_income_code  
+ethnic_code  
+
+**Dependent Variable**: Transaction Count (generated variable)  
+* Why is net_purchase_amount not a sufficient dependent variable?  
+Will look at the program 1 year before and 1 year after the start.
+
+**Unused Variables**:  
+transaction_id  
+customer_id  
+purchase_date  
+sku  
+return_date  
+return_store  
+time_to_return  
+homeowner_code  
+length_of_residence  
+child  
+year  
+month_index  
+summary  
+
+
+
+# Data Cleaning for sales model
+
+## Create BOPS dummy variable
+Data was originaly given in two seperate files and so we have to merge them.  
+0 = Purchase in store  
+1 = Purchase online  
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Add column to the individual years
+bops2012 <- bops2012[,-c(1,3)]
+bops2012 <- cbind(bops2012, b2012 = 1)
+bops2013 <- bops2013[,-c(1,3)]
+bops2013 <- cbind(bops2013, b2013 = 1)
+
+# Merge dataframes
+bops <- merge(bops, bops2012, by="transaction_id", all.x=TRUE)
+bops <- merge(bops, bops2013, by="transaction_id", all.x=TRUE)
+
+# fill in NA
+bops$b2012[is.na(bops$b2012)] <- 0
+bops$b2013[is.na(bops$b2013)] <- 0
+
+#merge the 2 columns
+bops$bops <- bops$b2012 + bops$b2013
+bops$gender <- as.factor(bops$gender)
+bops$ethnic_code <- as.factor(bops$ethnic_code)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops2 <- bops[,-c(3,6:10,18:19, 22:23)]
+```
+
+## Filter out customers with only 1 transaction
+We are primarily concerned with return customers and not one time only customers.
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops2$customer_id <- as.factor(bops2$customer_id)
+bops2a <- bops2[which(bops2$month_index <= 24),]
+bops2b <- bops2[which(bops2$month_index <= 36 & bops2$month_index >= 25),]
+# determine duplicates
+a = count(bops2a, customer_id)
+bops2a <- merge(bops2a, a, by="customer_id", all.x=TRUE)
+bops2a <- bops2a[which(bops2a$n >= 2),]
+bops2a <- bops2a %>%
+  group_by(customer_id) %>%
+  summarise(net_purchase_amount = sum(net_purchase_amount), store_number = first(store_number), gender = first(gender), age_band = first(age_band), est_income_code = first(est_income_code), ethnic_code = first(ethnic_code), bops = first(bops), numitems = first(n), homeowner_code = first(homeowner_code), length_of_residence = first(length_of_residence), child = first(child))
+a = count(bops2b, customer_id)
+bops2b <- merge(bops2b, a, by="customer_id", all.x=TRUE)
+bops2b <- bops2b[which(bops2b$n >= 2),]
+bops2b <- bops2b %>%
+  group_by(customer_id) %>%
+  summarise(net_purchase_amount = sum(net_purchase_amount), store_number = first(store_number), gender = first(gender), age_band = first(age_band), est_income_code = first(est_income_code), ethnic_code = first(ethnic_code), bops = first(bops), numitems = first(n), homeowner_code = first(homeowner_code), length_of_residence = first(length_of_residence), child = first(child))
+bops2 <- rbind(bops2a, bops2b)
+cat("From our original set of", nrow(bops), "data points, we are left with", nrow(bops2), "data points.")
+```
+
+
+
+## Data points that are missing information
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops2$missing_data <- 0
+bops2$missing_data <- rowSums(is.na(bops2))
+table(bops2$missing_data)
+```
+Confirm that we will not lose too much data due to NA.
+
+
+## net_purchase_amount (log)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cat("Number of na entries:", sum(is.na(bops$net_purchase_amount)))
+bops2$net_purchase_amount <- log(bops2$net_purchase_amount+1)
+p1 <- ggplot(bops, aes(x=net_purchase_amount)) + 
+  geom_histogram()
+p2 <- ggplot(bops2, aes(x=net_purchase_amount))+
+  geom_histogram()
+multiplot(p1, p2, cols=2)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops3 <- bops2[!(bops2$store_number == "5998"),]
+bops3 <- within(bops3, store_number <- relevel(store_number, ref = 3))
+```
+
+
+# Sales Model 1 OLS (2+ items purchased)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+sales1 <- lm(numitems ~ bops + store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code, data=bops3)
+summary(sales1)
+```
+
+# Sales Model with Interaction (2+ items purchased)
+We want to see the effect on stores.
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+sales2 <- lm(numitems ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code, data=bops3)
+summary(sales2)
+```
+
+## Comparison of the two models (nested)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+anova(sales1, sales2, test="Chisq")
+```
+
+# Poisson
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+poisson1 <- glm(numitems ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code, family="poisson", data=bops3)
+summary(poisson1)
+```
+
+## Heteroscedasticity test and IRRs
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(lmtest)
+gqtest(poisson1) 
+bptest(poisson1) 
+```
+
+Both tests are significant therefore we have heteroscedasticity.
+
+## Huber-White robust standard errors
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+f <- as.data.frame(coeftest(poisson1, vcov = vcovHC(poisson1, "HC1"))[,-c(2,3)])
+f <- cbind(summary(poisson1)$coefficients[,-c(2,3)], f)
+colnames(f) <- c("Orig Est", "Pr(>|z|)", "Std Errors Est", "Pr(>|z|)")
+f[,2][f[,2] <= 0.05] <- "***"
+f[,2][f[,2] >= 0.05] <- ""
+f[,4][f[,4] <= 0.05] <- "***"
+f[,4][f[,4] >= 0.05] <- ""
+f
+```
+
+bops and store number are still significant.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+exp(coef(poisson1)) # We see that the incident rate for facebookvisit is 1.083 times the incident rate for the no facebookvisit. Customers who visit Facebook before Amazon purchase 8.3% more than customers who visit Amazon.com directly.
+```
+
+## Model fit test
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cat("Chi-squared test statistic:", with(poisson1, null.deviance - deviance))
+cat("Degrees of freedom:", with(poisson1, df.null - df.residual))
+cat("P value:", with(poisson1, pchisq(null.deviance - deviance, df.null - df.residual, lower.tail = FALSE)))
+```
+Horrible fit
+
+# Negative Binomial model
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(foreign)
+library(MASS)
+summary(negbin1 <- glm.nb(numitems ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code, data = bops3))
+```
+
+## Heteroscedasticity
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+gqtest(negbin1) 
+bptest(negbin1)
+e <- as.data.frame(coeftest(negbin1, vcov = vcovHC(negbin1, "HC1"))[,-c(2,3)])
+e <- cbind(summary(negbin1)$coefficients[,-c(2,3)], e)
+colnames(e) <- c("Orig Est", "Pr(>|z|)", "Std Errors Est", "Pr(>|z|)")
+e[,2][e[,2] <= 0.05] <- "***"
+e[,2][e[,2] >= 0.05] <- ""
+e[,4][e[,4] <= 0.05] <- "***"
+e[,4][e[,4] >= 0.05] <- ""
+e
+```
+
+## Test model fit
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cat("Chi-squared test statistic:", with(negbin1, null.deviance - deviance))
+cat("Degrees of freedom:", with(negbin1, df.null - df.residual))
+cat("P value:", with(negbin1, pchisq(null.deviance - deviance, df.null - df.residual, lower.tail = FALSE)))
+```
+Model fits the data since the test is significant
+
+## Compare Poisson regression to Negative Binomial regression
+Chisq Test  
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+X2 <- 2 * (logLik(negbin1) - logLik(poisson1))
+X2
+pchisq(X2, df = 1, lower.tail=FALSE) 
+```
+Negative Binomial is more appropriate than Poisson since there is over-dispersion.  
+
+
+# Sales Model Summary
+Final Model: Negative Binomial
+numitems ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code  
+
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(effects)
+plot(effect(term="bops:store_number", mod=negbin1, default.levels=2),multiline=TRUE)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, results = 'asis'}
+library(knitr)
+z <- matrix(c("$170", "$146", "75,000", "6,500", "1.5", "0.6", "$19,125,000", "$569,400"), ncol=4)
+colnames(z) <- c("Mean Transaction Price", "Number of Customer", "Transaction Increase", "Total Sales Increase")
+rownames(z) <- c(2, 6)
+kable(z, caption = "Sales Increase")
+```
+
+
+
+# Goal 2: Store Returns
+
+**Purpose**:  Assess the impact of the BOPS strategy on store returns  
+
+**Dependent Variable**: return (dummy variable)  
+0 - Item has not been returned  
+1 - Item has been returned  
+
+**Primary Independent Variable**: BOPS (dummy variable)  
+0 - mail  
+1 - store pickup
+
+**Secondary Independent Variable**: Store Number  
+As the purpose states, we want to assess impact at the store level.
+
+**Control Variables**:  
+log(net_puchase_amount)  
+gender  
+age_band  
+est_income_code  
+ethnic_code  
+month  
+summary *
+
+# Data Cleaning for returns model
+
+## Data points that are missing information
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops1 <- bops[,-c(3, 6, 8:10, 20, 22:23)]
+bops1$missing_data <- 0
+bops1$missing_data <- rowSums(is.na(bops1))
+table(bops1$missing_data)
+```
+
+
+## net_purchase_amount (log)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+cat("Number of na entries:", sum(is.na(bops$net_purchase_amount)))
+bops1$net_purchase_amount <- log(bops1$net_purchase_amount+1)
+p1 <- ggplot(bops, aes(x=net_purchase_amount)) + 
+  geom_histogram()
+p2 <- ggplot(bops1, aes(x=net_purchase_amount))+
+  geom_histogram()
+multiplot(p1, p2, cols=2)
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+returns1 <- bops1
+returns1$summary <- as.factor(returns1$summary)
+```
+
+# Returns Model 1 OLS
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+retmodel1 <- lm(return ~ bops + store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month + summary, data=returns1)
+summary(retmodel1)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+#dfret1=data.frame(returns1$bops,returns1$net_purchase_amount,returns1$age_band,returns1$est_income_code)
+#vif(dfret1)
+```
+
+# Returns Model 2 OLS (interaction with store_number)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+retmodel2 <- lm(return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month+ summary, data=returns1)
+summary(retmodel2)
+```
+
+## Comparison of models
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+anova(retmodel1,retmodel2,test="Chisq")
+```
+Model with interaction variable is better
+
+## Range of Returns Model 2
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+predictedprobability_lm<-predict(retmodel2)
+#Range along is sufficient to explain why we have to switch to Logit model.
+range(predictedprobability_lm)
+library(aod)
+library(Rcpp)
+```
+
+We expect the results to be between 0 and 1.  However it is out of bounds.
+
+#Logit Model 
+
+## Satisfaction of Logit Requirements
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+table(returns1$return)
+```
+
+## Model
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+returns1$gender <- as.factor(returns1$gender)
+returns1$ethnic_code <- as.factor(returns1$ethnic_code)
+returns1$month <- as.factor(returns1$month)
+logit1<- glm(return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month+ summary, data=returns1, family="binomial")
+summary(logit1)
+```
+
+
+# Marginal Effect
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(mfx)
+#Rule of thumb, we always assume heterskedasticity is present, thus we use robust standard error to adjust standard errors for independent variables.
+b <- logitmfx(formula=return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month+ summary, data=returns1, robust=TRUE)
+b
+```
+
+#Comparison with Probit model (marginal effects)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+probit1<- glm(return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month+ summary, data=returns1, family=binomial(link="probit"))
+c <- probitmfx(formula=return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month+ summary, data=returns1, robust=TRUE)
+a <- as.data.frame(b$mfxest[,1])
+a <- cbind(a, c$mfxest[,1])
+colnames(a) <- c("logit", "probit")
+a
+```
+
+# Endogenity
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+returns1$child <- as.numeric(returns1$child)
+returns1$homeowner_code <- as.numeric(returns1$homeowner_code)
+df=data.frame(returns1$return, returns1$bops, returns1$homeowner_code, returns1$length_of_residence, returns1$child)
+cor(df, use="pairwise.complete.obs")[,1:2]
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+## 2SLS with 2 instruments (homeowner_code + length_of_residence)
+#sls2 <- ivreg(return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month + summary | homeowner_code + length_of_residence + store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month + summary, data = returns1)
+#summary(sls2,diagnostics=TRUE)
+```
+
+# Summary
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+plot(effect(term="bops:store_number", mod=logit1, default.levels=3),multiline=TRUE)
+```
+
+
+
