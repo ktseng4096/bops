@@ -1,0 +1,144 @@
+---
+title: "Buy Online Pick Up in Store (BOPS)"
+author: "Kevin, Ram, Ryo"
+date: "June 6, 2017"
+output: 
+  slidy_presentation: default
+  ioslides_presentation: default
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+setwd("C:/Users/kevin/Dropbox/SCU/OMIS 3392/project") 
+# Assessing the impact of buy-online-pick up-in store strategy on online and Brick-and-mortar store sales and returns
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+## Load Data Set
+library(data.table)
+library(readr)
+library(dplyr)
+library(VIF)
+library(usdm)
+library(AER)
+library(foreign)
+bops <- read_csv("C:/Users/kevin/Dropbox/SCU/OMIS 3392/project/data.txt")
+bops <- as.data.table(bops)
+bops2012 <- fread("C:/Users/kevin/Dropbox/SCU/OMIS 3392/project/BOPS-FY12.csv")
+bops2013 <- fread("C:/Users/kevin/Dropbox/SCU/OMIS 3392/project/BOPS-FY13.csv")
+
+# bops - original data file
+# bops1 - used for returns model
+# bops2 - used for sales model
+# bops3 - sales model for store 2 and 6
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops$gender[is.na(bops$gender)] <- "U"
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops$homeowner_code[bops$homeowner_code == "R"] <- 0
+bops$homeowner_code[bops$homeowner_code == "O"] <- 1
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops$store_number <- as.factor(bops$store_number)
+bops <- within(bops, store_number <- relevel(store_number, ref = 3))
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+# Add column to the individual years
+bops2012 <- bops2012[,-c(1,3)]
+bops2012 <- cbind(bops2012, b2012 = 1)
+bops2013 <- bops2013[,-c(1,3)]
+bops2013 <- cbind(bops2013, b2013 = 1)
+
+# Merge dataframes
+bops <- merge(bops, bops2012, by="transaction_id", all.x=TRUE)
+bops <- merge(bops, bops2013, by="transaction_id", all.x=TRUE)
+
+# fill in NA
+bops$b2012[is.na(bops$b2012)] <- 0
+bops$b2013[is.na(bops$b2013)] <- 0
+
+#merge the 2 columns
+bops$bops <- bops$b2012 + bops$b2013
+bops$gender <- as.factor(bops$gender)
+bops$ethnic_code <- as.factor(bops$ethnic_code)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops2 <- bops[,-c(3,6:10,18:19, 22:23)]
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops2$customer_id <- as.factor(bops2$customer_id)
+bops2a <- bops2[which(bops2$month_index <= 24),]
+bops2b <- bops2[which(bops2$month_index <= 36 & bops2$month_index >= 25),]
+# determine duplicates
+a = count(bops2a, customer_id)
+bops2a <- merge(bops2a, a, by="customer_id", all.x=TRUE)
+bops2a <- bops2a[which(bops2a$n >= 2),]
+bops2a <- bops2a %>%
+  group_by(customer_id) %>%
+  summarise(net_purchase_amount = sum(net_purchase_amount), store_number = first(store_number), gender = first(gender), age_band = first(age_band), est_income_code = first(est_income_code), ethnic_code = first(ethnic_code), bops = first(bops), numitems = first(n), homeowner_code = first(homeowner_code), length_of_residence = first(length_of_residence), child = first(child))
+a = count(bops2b, customer_id)
+bops2b <- merge(bops2b, a, by="customer_id", all.x=TRUE)
+bops2b <- bops2b[which(bops2b$n >= 2),]
+bops2b <- bops2b %>%
+  group_by(customer_id) %>%
+  summarise(net_purchase_amount = sum(net_purchase_amount), store_number = first(store_number), gender = first(gender), age_band = first(age_band), est_income_code = first(est_income_code), ethnic_code = first(ethnic_code), bops = first(bops), numitems = first(n), homeowner_code = first(homeowner_code), length_of_residence = first(length_of_residence), child = first(child))
+bops2 <- rbind(bops2a, bops2b)
+
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops2$missing_data <- 0
+bops2$missing_data <- rowSums(is.na(bops2))
+
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cat("Number of na entries:", sum(is.na(bops$net_purchase_amount)))
+bops2$net_purchase_amount <- log(bops2$net_purchase_amount+1)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bops3 <- bops2[!(bops2$store_number == "5998"),]
+bops3 <- within(bops3, store_number <- relevel(store_number, ref = 3))
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(ggplot2)
+bops$net_purchase_amount <- log(bops$net_purchase_amount+1)
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+returns1 <- bops
+returns1$summary <- as.factor(returns1$summary)
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+library(aod)
+library(Rcpp)
+```
+
+
+
+# 2SLS with 2 instruments (homeowner_code + length_of_residence)
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+sls2 <- ivreg(return ~ bops * store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month + summary | homeowner_code + length_of_residence + store_number + net_purchase_amount + gender + age_band + est_income_code + ethnic_code + month + summary, data = returns1)
+summary(sls2,diagnostics=TRUE)
+```
+
+
+
+
